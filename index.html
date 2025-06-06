@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>RTS Prototype</title>
+  <style>
+    canvas {
+      border: 2px solid #000;
+      background-color: #3a7b2c;
+      cursor: crosshair;
+      image-rendering: pixelated;
+    }
+  </style>
+</head>
+<body>
+<canvas id="game" width="800" height="600"></canvas>
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+const TILE_SIZE = 40;
+const MAP_WIDTH = 20;
+const MAP_HEIGHT = 15;
+const SPEED = 2;
+
+const map = Array.from({ length: MAP_HEIGHT }, () =>
+  Array.from({ length: MAP_WIDTH }, () => Math.random() > 0.9 ? 1 : 0)
+);
+
+const units = [];
+for (let i = 0; i < 5; i++) {
+  units.push({
+    id: i,
+    x: 2 + i,
+    y: 2,
+    px: (2 + i) * TILE_SIZE,
+    py: 2 * TILE_SIZE,
+    selected: false,
+    target: null,
+    speed: SPEED
+  });
+}
+
+let isDragging = false;
+let dragStart = null;
+let dragEnd = null;
+
+canvas.addEventListener('mousedown', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const tileX = Math.floor(x / TILE_SIZE);
+  const tileY = Math.floor(y / TILE_SIZE);
+
+  if (e.button === 0) {
+    isDragging = true;
+    dragStart = { x, y };
+    dragEnd = null;
+
+    // Клик по юниту — выделение
+    const clickedUnit = units.find(u =>
+      x >= u.px && x <= u.px + TILE_SIZE &&
+      y >= u.py && y <= u.py + TILE_SIZE
+    );
+
+    if (clickedUnit) {
+      units.forEach(u => u.selected = false);
+      clickedUnit.selected = true;
+      isDragging = false;
+    }
+  }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (!isDragging) return;
+  const rect = canvas.getBoundingClientRect();
+  dragEnd = {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  };
+});
+
+canvas.addEventListener('mouseup', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const tileX = Math.floor(x / TILE_SIZE);
+  const tileY = Math.floor(y / TILE_SIZE);
+
+  if (e.button === 0 && isDragging && dragStart && dragEnd) {
+    // Выделение по рамке
+    const x1 = Math.min(dragStart.x, dragEnd.x);
+    const y1 = Math.min(dragStart.y, dragEnd.y);
+    const x2 = Math.max(dragStart.x, dragEnd.x);
+    const y2 = Math.max(dragStart.y, dragEnd.y);
+
+    units.forEach(u => {
+      const cx = u.px + TILE_SIZE / 2;
+      const cy = u.py + TILE_SIZE / 2;
+      u.selected = (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2);
+    });
+  }
+
+  isDragging = false;
+  dragStart = null;
+  dragEnd = null;
+});
+
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  const tileX = Math.floor(x / TILE_SIZE);
+  const tileY = Math.floor(y / TILE_SIZE);
+
+  const taken = new Set(units.map(u => `${u.x},${u.y}`));
+  let offsetIndex = 0;
+  const offsets = [
+    [0,0],[1,0],[-1,0],[0,1],[0,-1],
+    [1,1],[-1,-1],[1,-1],[-1,1],
+    [2,0],[-2,0],[0,2],[0,-2]
+  ];
+
+  for (const unit of units.filter(u => u.selected)) {
+    let tx = tileX;
+    let ty = tileY;
+
+    while (taken.has(`${tx},${ty}`) && offsetIndex < offsets.length) {
+      const [dx, dy] = offsets[offsetIndex++];
+      tx = tileX + dx;
+      ty = tileY + dy;
+    }
+
+    taken.add(`${tx},${ty}`);
+    unit.target = { x: tx, y: ty };
+  }
+});
+
+function update() {
+  for (const unit of units) {
+    if (unit.target) {
+      const tx = unit.target.x * TILE_SIZE + TILE_SIZE / 2;
+      const ty = unit.target.y * TILE_SIZE + TILE_SIZE / 2;
+      const dx = tx - (unit.px + TILE_SIZE / 2);
+      const dy = ty - (unit.py + TILE_SIZE / 2);
+      const dist = Math.hypot(dx, dy);
+      if (dist > unit.speed) {
+        unit.px += unit.speed * dx / dist;
+        unit.py += unit.speed * dy / dist;
+      } else {
+        unit.px = tx - TILE_SIZE / 2;
+        unit.py = ty - TILE_SIZE / 2;
+        unit.x = unit.target.x;
+        unit.y = unit.target.y;
+        unit.target = null;
+      }
+    }
+  }
+}
+
+function drawMap() {
+  for (let y = 0; y < MAP_HEIGHT; y++) {
+    for (let x = 0; x < MAP_WIDTH; x++) {
+      ctx.fillStyle = map[y][x] === 0 ? '#3a7b2c' : '#2e4a21';
+      ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
+  }
+}
+
+function drawUnits() {
+  for (const unit of units) {
+    ctx.fillStyle = unit.selected ? '#ff0' : '#00f';
+    ctx.fillRect(unit.px + 4, unit.py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+  }
+}
+
+function drawSelectionBox() {
+  if (isDragging && dragStart && dragEnd) {
+    ctx.strokeStyle = '#fff';
+    ctx.setLineDash([4, 2]);
+    ctx.strokeRect(
+      Math.min(dragStart.x, dragEnd.x),
+      Math.min(dragStart.y, dragEnd.y),
+      Math.abs(dragEnd.x - dragStart.x),
+      Math.abs(dragEnd.y - dragStart.y)
+    );
+    ctx.setLineDash([]);
+  }
+}
+
+function gameLoop() {
+  update();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  drawMap();
+  drawUnits();
+  drawSelectionBox();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+</body>
+</html>
