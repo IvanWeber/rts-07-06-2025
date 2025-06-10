@@ -343,9 +343,22 @@ function update() {
       } else {
         unit.px = tx - TILE_SIZE / 2;
         unit.py = ty - TILE_SIZE / 2;
-        unit.x = next.x;
-        unit.y = next.y;
-        unit.path.shift();
+        // Проверим, свободен ли тайл перед перемещением
+        const occupied = units.some(u =>
+          !u.dead && u !== unit && u.x === next.x && u.y === next.y
+        );
+
+        if (!occupied) {
+          unit.px = tx - TILE_SIZE / 2;
+          unit.py = ty - TILE_SIZE / 2;
+          unit.x = next.x;
+          unit.y = next.y;
+          unit.path.shift();
+        } else {
+          // остановка — пусть попытается позже снова
+          unit.path = [];
+        }
+
       }
     }
 
@@ -365,11 +378,46 @@ function update() {
           unit.target = null;
         }
       } else if (unit.path.length === 0) {
-        const path = findPath({ x: unit.x, y: unit.y }, { x: unit.target.x, y: unit.target.y }, map);
-        if (path.length > 0) {
-          unit.path = path;
+        const range = unit.type === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
+        const targetTiles = [];
+
+        for (let dx = -range; dx <= range; dx++) {
+          for (let dy = -range; dy <= range; dy++) {
+            const tx = unit.target.x + dx;
+            const ty = unit.target.y + dy;
+            const dist = Math.abs(dx) + Math.abs(dy);
+            if (
+              dist <= range &&
+              tx >= 0 && ty >= 0 && tx < MAP_WIDTH && ty < MAP_HEIGHT &&
+              map[ty][tx] === 0 &&
+              !units.find(u => !u.dead && u.x === tx && u.y === ty)
+            ) {
+              targetTiles.push({ x: tx, y: ty });
+            }
+          }
+        }
+
+        targetTiles.sort((a, b) =>
+          Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+          (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+        );
+
+        let found = false;
+        for (const tile of targetTiles) {
+          const path = findPath({ x: unit.x, y: unit.y }, tile, map);
+          if (path.length > 0) {
+            unit.path = path;
+            found = true;
+            break;
+          }
+        }
+
+        // Если не нашли — забудем цель
+        if (!found) {
+          unit.target = null;
         }
       }
+
     } else {
       unit.target = null;
     }
