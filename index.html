@@ -56,7 +56,7 @@ for (let i = 0; i < 5; i++) {
   });
 }
 
-// Вражеские юниты
+// Враги
 for (let i = 0; i < 3; i++) {
   const ranged = i === 0;
   units.push({
@@ -81,7 +81,7 @@ let isDragging = false;
 let dragStart = null;
 let dragEnd = null;
 
-const effects = []; // Всплывающие стрелки (анимация)
+const effects = [];
 
 canvas.addEventListener('mousedown', (e) => {
   const rect = canvas.getBoundingClientRect();
@@ -94,8 +94,7 @@ canvas.addEventListener('mousedown', (e) => {
     dragEnd = null;
 
     const clickedUnit = units.find(u =>
-      !u.dead &&
-      u.team === 'player' &&
+      !u.dead && u.team === 'player' &&
       x >= u.px && x <= u.px + TILE_SIZE &&
       y >= u.py && y <= u.py + TILE_SIZE
     );
@@ -150,21 +149,51 @@ canvas.addEventListener('contextmenu', (e) => {
   const tileY = Math.floor(y / TILE_SIZE);
 
   const clickedEnemy = units.find(u =>
-    !u.dead &&
-    u.team === 'enemy' &&
+    !u.dead && u.team === 'enemy' &&
     x >= u.px && x <= u.px + TILE_SIZE &&
     y >= u.py && y <= u.py + TILE_SIZE
   );
 
   if (clickedEnemy) {
-    // атака
     for (const unit of units.filter(u => u.selected && !u.dead)) {
-      unit.path = [];
       unit.target = clickedEnemy;
+
+      const range = unit.type === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
+      const targetTiles = [];
+
+      for (let dx = -range; dx <= range; dx++) {
+        for (let dy = -range; dy <= range; dy++) {
+          const tx = clickedEnemy.x + dx;
+          const ty = clickedEnemy.y + dy;
+          const dist = Math.abs(dx) + Math.abs(dy);
+          if (
+            dist <= range &&
+            tx >= 0 && ty >= 0 && tx < MAP_WIDTH && ty < MAP_HEIGHT &&
+            map[ty][tx] === 0 &&
+            !units.find(u => !u.dead && u.x === tx && u.y === ty)
+          ) {
+            targetTiles.push({ x: tx, y: ty });
+          }
+        }
+      }
+
+      // Найдём ближайший пригодный тайл
+      targetTiles.sort((a, b) =>
+        Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+        (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+      );
+
+      for (const tile of targetTiles) {
+        const path = findPath({ x: unit.x, y: unit.y }, tile, map);
+        if (path.length > 0) {
+          unit.path = path;
+          break;
+        }
+      }
     }
+
     effects.push({ x, y, color: 'red', time: 30 });
   } else {
-    // перемещение
     const taken = new Set(units.filter(u => !u.dead).map(u => `${u.x},${u.y}`));
     let offsetIndex = 0;
     const offsets = [
@@ -250,19 +279,23 @@ function update() {
   for (const unit of units) {
     if (unit.dead) continue;
 
-    // Вражеская логика автопоиска цели
+    // Автоматическая агрессия врагов
     if (unit.team === 'enemy' && !unit.target) {
-      const enemyTarget = units.find(u =>
-        !u.dead &&
-        u.team === 'player' &&
-        Math.abs(u.x - unit.x) <= 8 &&
-        Math.abs(u.y - unit.y) <= 8
-      );
-      if (enemyTarget) {
-        unit.target = enemyTarget;
+      const nearest = units
+        .filter(u => !u.dead && u.team === 'player')
+        .sort((a, b) =>
+          Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+          (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+        )[0];
+
+      if (nearest) {
+        const dx = Math.abs(unit.x - nearest.x);
+        const dy = Math.abs(unit.y - nearest.y);
+        if (dx <= 8 && dy <= 8) {
+          unit.target = nearest;
+        }
       }
     }
-
 
     // движение
     if (unit.path && unit.path.length > 0) {
@@ -285,24 +318,23 @@ function update() {
       }
     }
 
-    // атака
-    const target = unit.target;
-    if (target && !target.dead) {
-      const dx = Math.abs(unit.x - target.x);
-      const dy = Math.abs(unit.y - target.y);
+    // авто-подход к цели
+    if (unit.target && !unit.target.dead) {
+      const dx = Math.abs(unit.x - unit.target.x);
+      const dy = Math.abs(unit.y - unit.target.y);
       const inRange = unit.type === 'ranged'
         ? dx <= RANGED_RANGE && dy <= RANGED_RANGE
         : dx <= MELEE_RANGE && dy <= MELEE_RANGE;
 
       if (inRange) {
-        target.hp -= ATTACK_DAMAGE;
-        if (target.hp <= 0) {
-          target.dead = true;
-          target.selected = false;
-          target.target = null;
+        unit.target.hp -= ATTACK_DAMAGE;
+        if (unit.target.hp <= 0) {
+          unit.target.dead = true;
+          unit.target.selected = false;
+          unit.target = null;
         }
-      } else if (unit.type === 'melee' && unit.path.length === 0) {
-        const path = findPath({ x: unit.x, y: unit.y }, { x: target.x, y: target.y }, map);
+      } else if (unit.path.length === 0) {
+        const path = findPath({ x: unit.x, y: unit.y }, { x: unit.target.x, y: unit.target.y }, map);
         if (path.length > 0) {
           unit.path = path;
         }
@@ -312,10 +344,7 @@ function update() {
     }
   }
 
-  // эффекты стрелок
-  for (const fx of effects) {
-    fx.time--;
-  }
+  effects.forEach(fx => fx.time--);
 }
 
 function drawMap() {
@@ -343,14 +372,14 @@ function drawUnits() {
     ctx.fillStyle = unit.selected ? '#ff0' : (unit.team === 'player' ? '#00f' : '#f00');
     ctx.fillRect(unit.px + 4, unit.py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
 
-    // иконка
+    // иконка (меч или лук)
     ctx.fillStyle = '#000';
     ctx.font = '16px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(unit.icon, unit.px + TILE_SIZE / 2, unit.py + TILE_SIZE / 2);
 
-    // здоровье
+    // полоса здоровья
     const barWidth = TILE_SIZE - 8;
     const hpPercent = Math.max(unit.hp / MAX_HP, 0);
     ctx.fillStyle = '#000';
