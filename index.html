@@ -370,12 +370,61 @@ function update() {
         ? dx <= RANGED_RANGE && dy <= RANGED_RANGE
         : dx <= MELEE_RANGE && dy <= MELEE_RANGE;
 
-      if (inRange) {
+      if (inRange && unit.target && !unit.target.dead) {
         unit.target.hp -= ATTACK_DAMAGE;
         if (unit.target.hp <= 0) {
-          unit.target.dead = true;
-          unit.target.selected = false;
+          const oldTarget = unit.target;
+          oldTarget.dead = true;
+          oldTarget.selected = false;
           unit.target = null;
+
+          // Авто-поиск новой цели (для игроков)
+          if (unit.team === 'player') {
+            const candidates = units
+              .filter(u => !u.dead && u.team === 'enemy')
+              .filter(u => Math.abs(u.x - unit.x) <= 8 && Math.abs(u.y - unit.y) <= 8)
+              .sort((a, b) =>
+                Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+                (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+              );
+
+            if (candidates.length > 0) {
+              const newTarget = candidates[0];
+              unit.target = newTarget;
+
+              const range = unit.type === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
+              const targetTiles = [];
+
+              for (let dx = -range; dx <= range; dx++) {
+                for (let dy = -range; dy <= range; dy++) {
+                  const tx = newTarget.x + dx;
+                  const ty = newTarget.y + dy;
+                  const dist = Math.abs(dx) + Math.abs(dy);
+                  if (
+                    dist <= range &&
+                    tx >= 0 && ty >= 0 && tx < MAP_WIDTH && ty < MAP_HEIGHT &&
+                    map[ty][tx] === 0 &&
+                    !units.find(u => !u.dead && u.x === tx && u.y === ty)
+                  ) {
+                    targetTiles.push({ x: tx, y: ty });
+                  }
+                }
+              }
+
+              targetTiles.sort((a, b) =>
+                Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+                (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+              );
+
+              for (const tile of targetTiles) {
+                const path = findPath({ x: unit.x, y: unit.y }, tile, map);
+                if (path.length > 0) {
+                  unit.path = path;
+                  break;
+                }
+              }
+            }
+          }
         }
       } else if (unit.path.length === 0) {
         const range = unit.type === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
@@ -420,7 +469,56 @@ function update() {
 
     } else {
       unit.target = null;
+
+      // Авто-поиск новой цели, если игрок
+      if (unit.team === 'player') {
+        const candidates = units
+          .filter(u => !u.dead && u.team === 'enemy')
+          .filter(u => Math.abs(u.x - unit.x) <= 8 && Math.abs(u.y - unit.y) <= 8)
+          .sort((a, b) =>
+            Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+            (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+          );
+
+        if (candidates.length > 0) {
+          const newTarget = candidates[0];
+          unit.target = newTarget;
+
+          const range = unit.type === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
+          const targetTiles = [];
+
+          for (let dx = -range; dx <= range; dx++) {
+            for (let dy = -range; dy <= range; dy++) {
+              const tx = newTarget.x + dx;
+              const ty = newTarget.y + dy;
+              const dist = Math.abs(dx) + Math.abs(dy);
+              if (
+                dist <= range &&
+                tx >= 0 && ty >= 0 && tx < MAP_WIDTH && ty < MAP_HEIGHT &&
+                map[ty][tx] === 0 &&
+                !units.find(u => !u.dead && u.x === tx && u.y === ty)
+              ) {
+                targetTiles.push({ x: tx, y: ty });
+              }
+            }
+          }
+
+          targetTiles.sort((a, b) =>
+            Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+            (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+          );
+
+          for (const tile of targetTiles) {
+            const path = findPath({ x: unit.x, y: unit.y }, tile, map);
+            if (path.length > 0) {
+              unit.path = path;
+              break;
+            }
+          }
+        }
+      }
     }
+
   }
 
   effects.forEach(fx => fx.time--);
