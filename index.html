@@ -250,6 +250,20 @@ function update() {
   for (const unit of units) {
     if (unit.dead) continue;
 
+    // Вражеская логика автопоиска цели
+    if (unit.team === 'enemy' && !unit.target) {
+      const enemyTarget = units.find(u =>
+        !u.dead &&
+        u.team === 'player' &&
+        Math.abs(u.x - unit.x) <= 8 &&
+        Math.abs(u.y - unit.y) <= 8
+      );
+      if (enemyTarget) {
+        unit.target = enemyTarget;
+      }
+    }
+
+
     // движение
     if (unit.path && unit.path.length > 0) {
       const next = unit.path[0];
