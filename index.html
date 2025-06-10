@@ -22,22 +22,46 @@ const TILE_SIZE = 40;
 const MAP_WIDTH = 20;
 const MAP_HEIGHT = 15;
 const SPEED = 2;
+const MAX_HP = 100;
+const ATTACK_RANGE = 5;
+const ATTACK_DAMAGE = 1;
 
 const map = Array.from({ length: MAP_HEIGHT }, () =>
   Array.from({ length: MAP_WIDTH }, () => Math.random() > 0.9 ? 1 : 0)
 );
 
+// Создание союзных юнитов
 const units = [];
 for (let i = 0; i < 5; i++) {
   units.push({
     id: i,
+    team: 'player',
     x: 2 + i,
     y: 2,
     px: (2 + i) * TILE_SIZE,
     py: 2 * TILE_SIZE,
     selected: false,
     path: [],
-    speed: SPEED
+    speed: SPEED,
+    hp: MAX_HP,
+    dead: false
+  });
+}
+
+// Создание врагов
+for (let i = 0; i < 3; i++) {
+  units.push({
+    id: 100 + i,
+    team: 'enemy',
+    x: MAP_WIDTH - 4 + i,
+    y: MAP_HEIGHT - 3,
+    px: (MAP_WIDTH - 4 + i) * TILE_SIZE,
+    py: (MAP_HEIGHT - 3) * TILE_SIZE,
+    selected: false,
+    path: [],
+    speed: SPEED,
+    hp: MAX_HP,
+    dead: false
   });
 }
 
@@ -45,6 +69,7 @@ let isDragging = false;
 let dragStart = null;
 let dragEnd = null;
 
+// === Ввод ===
 canvas.addEventListener('mousedown', (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
@@ -56,8 +81,10 @@ canvas.addEventListener('mousedown', (e) => {
     dragEnd = null;
 
     const clickedUnit = units.find(u =>
+      !u.dead &&
       x >= u.px && x <= u.px + TILE_SIZE &&
-      y >= u.py && y <= u.py + TILE_SIZE
+      y >= u.py && y <= u.py + TILE_SIZE &&
+      u.team === 'player'
     );
 
     if (clickedUnit) {
@@ -91,7 +118,8 @@ canvas.addEventListener('mouseup', (e) => {
     units.forEach(u => {
       const cx = u.px + TILE_SIZE / 2;
       const cy = u.py + TILE_SIZE / 2;
-      u.selected = (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2);
+      u.selected = !u.dead && u.team === 'player' &&
+                   (cx >= x1 && cx <= x2 && cy >= y1 && cy <= y2);
     });
   }
 
@@ -108,7 +136,9 @@ canvas.addEventListener('contextmenu', (e) => {
   const tileX = Math.floor(x / TILE_SIZE);
   const tileY = Math.floor(y / TILE_SIZE);
 
-  const taken = new Set(units.map(u => `${u.x},${u.y}`));
+  const taken = new Set(
+    units.filter(u => !u.dead).map(u => `${u.x},${u.y}`)
+  );
   let offsetIndex = 0;
   const offsets = [
     [0,0],[1,0],[-1,0],[0,1],[0,-1],
@@ -116,7 +146,7 @@ canvas.addEventListener('contextmenu', (e) => {
     [2,0],[-2,0],[0,2],[0,-2]
   ];
 
-  for (const unit of units.filter(u => u.selected)) {
+  for (const unit of units.filter(u => u.selected && !u.dead)) {
     let tx = tileX;
     let ty = tileY;
 
@@ -137,6 +167,7 @@ canvas.addEventListener('contextmenu', (e) => {
   }
 });
 
+// === Логика ===
 function findPath(start, goal, map) {
   const open = [start];
   const cameFrom = {};
@@ -170,7 +201,8 @@ function findPath(start, goal, map) {
       if (
         nx >= 0 && ny >= 0 &&
         nx < MAP_WIDTH && ny < MAP_HEIGHT &&
-        map[ny][nx] === 0
+        map[ny][nx] === 0 &&
+        !units.find(u => !u.dead && u.x === nx && u.y === ny)
       ) {
         const tentativeG = gScore[cKey] + 1;
         if (tentativeG < (gScore[nKey] ?? Infinity)) {
@@ -185,11 +217,14 @@ function findPath(start, goal, map) {
     }
   }
 
-  return []; // No path found
+  return [];
 }
 
 function update() {
   for (const unit of units) {
+    if (unit.dead) continue;
+
+    // движение по пути
     if (unit.path && unit.path.length > 0) {
       const next = unit.path[0];
       const tx = next.x * TILE_SIZE + TILE_SIZE / 2;
@@ -209,9 +244,27 @@ function update() {
         unit.path.shift();
       }
     }
+
+    // атака
+    if (unit.team === 'enemy') {
+      const target = units.find(
+        u => !u.dead &&
+             u.team === 'player' &&
+             Math.abs(u.x - unit.x) <= ATTACK_RANGE &&
+             Math.abs(u.y - unit.y) <= ATTACK_RANGE
+      );
+      if (target) {
+        target.hp -= ATTACK_DAMAGE;
+        if (target.hp <= 0) {
+          target.dead = true;
+          target.selected = false;
+        }
+      }
+    }
   }
 }
 
+// === Отрисовка ===
 function drawMap() {
   for (let y = 0; y < MAP_HEIGHT; y++) {
     for (let x = 0; x < MAP_WIDTH; x++) {
@@ -223,8 +276,28 @@ function drawMap() {
 
 function drawUnits() {
   for (const unit of units) {
-    ctx.fillStyle = unit.selected ? '#ff0' : '#00f';
+    if (unit.dead) {
+      // крестик
+      ctx.strokeStyle = '#000';
+      ctx.beginPath();
+      ctx.moveTo(unit.px + 6, unit.py + 6);
+      ctx.lineTo(unit.px + TILE_SIZE - 6, unit.py + TILE_SIZE - 6);
+      ctx.moveTo(unit.px + TILE_SIZE - 6, unit.py + 6);
+      ctx.lineTo(unit.px + 6, unit.py + TILE_SIZE - 6);
+      ctx.stroke();
+      continue;
+    }
+
+    ctx.fillStyle = unit.selected ? '#ff0' : (unit.team === 'player' ? '#00f' : '#f00');
     ctx.fillRect(unit.px + 4, unit.py + 4, TILE_SIZE - 8, TILE_SIZE - 8);
+
+    // полоска здоровья
+    const barWidth = TILE_SIZE - 8;
+    const hpPercent = Math.max(unit.hp / MAX_HP, 0);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(unit.px + 4, unit.py - 6, barWidth, 4);
+    ctx.fillStyle = '#0f0';
+    ctx.fillRect(unit.px + 4, unit.py - 6, barWidth * hpPercent, 4);
   }
 }
 
