@@ -281,21 +281,52 @@ function update() {
 
     // Автоматическая агрессия врагов
     if (unit.team === 'enemy' && !unit.target) {
-      const nearest = units
+      const candidates = units
         .filter(u => !u.dead && u.team === 'player')
+        .filter(u => Math.abs(u.x - unit.x) <= 8 && Math.abs(u.y - unit.y) <= 8)
         .sort((a, b) =>
           Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
           (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
-        )[0];
+        );
 
-      if (nearest) {
-        const dx = Math.abs(unit.x - nearest.x);
-        const dy = Math.abs(unit.y - nearest.y);
-        if (dx <= 8 && dy <= 8) {
-          unit.target = nearest;
+      if (candidates.length > 0) {
+        const target = candidates[0];
+        unit.target = target;
+
+        const range = unit.type === 'ranged' ? RANGED_RANGE : MELEE_RANGE;
+        const tiles = [];
+
+        for (let dx = -range; dx <= range; dx++) {
+          for (let dy = -range; dy <= range; dy++) {
+            const tx = target.x + dx;
+            const ty = target.y + dy;
+            const dist = Math.abs(dx) + Math.abs(dy);
+            if (
+              dist <= range &&
+              tx >= 0 && ty >= 0 && tx < MAP_WIDTH && ty < MAP_HEIGHT &&
+              map[ty][tx] === 0 &&
+              !units.find(u => !u.dead && u.x === tx && u.y === ty)
+            ) {
+              tiles.push({ x: tx, y: ty });
+            }
+          }
+        }
+
+        tiles.sort((a, b) =>
+          Math.abs(a.x - unit.x) + Math.abs(a.y - unit.y) -
+          (Math.abs(b.x - unit.x) + Math.abs(b.y - unit.y))
+        );
+
+        for (const tile of tiles) {
+          const path = findPath({ x: unit.x, y: unit.y }, tile, map);
+          if (path.length > 0) {
+            unit.path = path;
+            break;
+          }
         }
       }
     }
+
 
     // движение
     if (unit.path && unit.path.length > 0) {
