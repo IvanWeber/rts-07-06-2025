@@ -36,7 +36,7 @@ for (let i = 0; i < 5; i++) {
     px: (2 + i) * TILE_SIZE,
     py: 2 * TILE_SIZE,
     selected: false,
-    target: null,
+    path: [],
     speed: SPEED
   });
 }
@@ -49,15 +49,12 @@ canvas.addEventListener('mousedown', (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  const tileX = Math.floor(x / TILE_SIZE);
-  const tileY = Math.floor(y / TILE_SIZE);
 
   if (e.button === 0) {
     isDragging = true;
     dragStart = { x, y };
     dragEnd = null;
 
-    // Клик по юниту — выделение
     const clickedUnit = units.find(u =>
       x >= u.px && x <= u.px + TILE_SIZE &&
       y >= u.py && y <= u.py + TILE_SIZE
@@ -84,11 +81,8 @@ canvas.addEventListener('mouseup', (e) => {
   const rect = canvas.getBoundingClientRect();
   const x = e.clientX - rect.left;
   const y = e.clientY - rect.top;
-  const tileX = Math.floor(x / TILE_SIZE);
-  const tileY = Math.floor(y / TILE_SIZE);
 
   if (e.button === 0 && isDragging && dragStart && dragEnd) {
-    // Выделение по рамке
     const x1 = Math.min(dragStart.x, dragEnd.x);
     const y1 = Math.min(dragStart.y, dragEnd.y);
     const x2 = Math.max(dragStart.x, dragEnd.x);
@@ -126,34 +120,93 @@ canvas.addEventListener('contextmenu', (e) => {
     let tx = tileX;
     let ty = tileY;
 
-    while (taken.has(`${tx},${ty}`) && offsetIndex < offsets.length) {
+    while (
+      (taken.has(`${tx},${ty}`) || map[ty]?.[tx] === 1) &&
+      offsetIndex < offsets.length
+    ) {
       const [dx, dy] = offsets[offsetIndex++];
       tx = tileX + dx;
       ty = tileY + dy;
     }
 
     taken.add(`${tx},${ty}`);
-    unit.target = { x: tx, y: ty };
+    const path = findPath({ x: unit.x, y: unit.y }, { x: tx, y: ty }, map);
+    if (path.length > 0) {
+      unit.path = path;
+    }
   }
 });
 
+function findPath(start, goal, map) {
+  const open = [start];
+  const cameFrom = {};
+  const gScore = {};
+  const fScore = {};
+  const key = (x, y) => `${x},${y}`;
+
+  gScore[key(start.x, start.y)] = 0;
+  fScore[key(start.x, start.y)] = Math.abs(goal.x - start.x) + Math.abs(goal.y - start.y);
+
+  while (open.length > 0) {
+    open.sort((a, b) => fScore[key(a.x, a.y)] - fScore[key(b.x, b.y)]);
+    const current = open.shift();
+    const cKey = key(current.x, current.y);
+
+    if (current.x === goal.x && current.y === goal.y) {
+      const path = [];
+      let currKey = cKey;
+      while (cameFrom[currKey]) {
+        path.unshift(cameFrom[currKey].step);
+        currKey = cameFrom[currKey].from;
+      }
+      return path;
+    }
+
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+      const nx = current.x + dx;
+      const ny = current.y + dy;
+      const nKey = key(nx, ny);
+
+      if (
+        nx >= 0 && ny >= 0 &&
+        nx < MAP_WIDTH && ny < MAP_HEIGHT &&
+        map[ny][nx] === 0
+      ) {
+        const tentativeG = gScore[cKey] + 1;
+        if (tentativeG < (gScore[nKey] ?? Infinity)) {
+          cameFrom[nKey] = { from: cKey, step: { x: nx, y: ny } };
+          gScore[nKey] = tentativeG;
+          fScore[nKey] = tentativeG + Math.abs(goal.x - nx) + Math.abs(goal.y - ny);
+          if (!open.find(n => n.x === nx && n.y === ny)) {
+            open.push({ x: nx, y: ny });
+          }
+        }
+      }
+    }
+  }
+
+  return []; // No path found
+}
+
 function update() {
   for (const unit of units) {
-    if (unit.target) {
-      const tx = unit.target.x * TILE_SIZE + TILE_SIZE / 2;
-      const ty = unit.target.y * TILE_SIZE + TILE_SIZE / 2;
+    if (unit.path && unit.path.length > 0) {
+      const next = unit.path[0];
+      const tx = next.x * TILE_SIZE + TILE_SIZE / 2;
+      const ty = next.y * TILE_SIZE + TILE_SIZE / 2;
       const dx = tx - (unit.px + TILE_SIZE / 2);
       const dy = ty - (unit.py + TILE_SIZE / 2);
       const dist = Math.hypot(dx, dy);
+
       if (dist > unit.speed) {
         unit.px += unit.speed * dx / dist;
         unit.py += unit.speed * dy / dist;
       } else {
         unit.px = tx - TILE_SIZE / 2;
         unit.py = ty - TILE_SIZE / 2;
-        unit.x = unit.target.x;
-        unit.y = unit.target.y;
-        unit.target = null;
+        unit.x = next.x;
+        unit.y = next.y;
+        unit.path.shift();
       }
     }
   }
